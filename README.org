@@ -1,0 +1,57 @@
+#+author:Alice Liddell 
+#+TITLE: cutesetup
+#+options: toc:nil
+
+#+BEGIN_QUOTE
+✿ A cute Haskell TUI for quickly scaffolding =flake.nix= + =.envrc= for common languages.
+#+END_QUOTE
+
+* Features
+- *Language picker* — 13 languages: Python, Rust, Go, Node.js, Haskell, Ruby, Zig, C, Java, Elixir, Gleam, OCaml, Nix
+- *Package picker* — pre-curated packages per language, toggle on/off with =Space=
+- *nix search integration* — press =s= to open a live search screen powered by =nix search nixpkgs=, add results to your devshell
+- *Auto-generates* =flake.nix= (with =flake-utils=, =eachDefaultSystem=, =mkShell=) and =.envrc= (=use flake=)
+- Backs up existing files to =.bak= before overwriting
+
+* Usage
+#+BEGIN_SRC bash
+# In your project directory:
+cutesetup
+#+END_SRC
+
+** Keys
+| Screen     | Key           | Action                 |
+|------------+---------------+------------------------|
+| Language   | =↑= / =↓=     | Navigate               |
+| Language   | =Enter=       | Select language        |
+| Language   | =q=           | Quit                   |
+| Packages   | =↑= / =↓=     | Navigate               |
+| Packages   | =Space=       | Toggle package         |
+| Packages   | =s=           | Open nix search        |
+| Packages   | =Enter=       | Continue to output dir |
+| Packages   | =Esc=         | Back to lang picker    |
+| nix search | type          | Search nixpkgs live    |
+| nix search | =↑= / =↓=     | Navigate results       |
+| nix search | =Enter=       | Add / remove result    |
+| nix search | =Tab=         | Skip to output dir     |
+| nix search | =Esc=         | Back to packages       |
+| Dir        | type          | Edit output path       |
+| Dir        | =Enter=       | *Generate files*       |
+| Dir        | =Esc=         | Back to packages       |
+| Done       | =q= / =Enter= | Exit                   |
+
+* Building
+#+BEGIN_SRC bash
+# With nix:
+nix build
+
+# With cabal (inside nix shell):
+nix develop
+cabal build
+#+END_SRC
+
+* "Install"
+I don't recommed this but if you want to use profile go ahead.
+#+BEGIN_SRC bash
+nix profile install .
+#+END_SRC
