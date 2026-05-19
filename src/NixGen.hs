@@ -8,7 +8,8 @@ module NixGen
 import Data.List (intercalate, nub)
 import Languages (Language (..), LangPackage (..))
 import NixSearch (Channel (..))
-import System.Directory (doesFileExist)
+import Control.Exception (try, SomeException)
+import System.Directory (doesFileExist, createDirectoryIfMissing)
 import System.FilePath ((</>))
 
 data GenerateConfig = GenerateConfig
@@ -18,6 +19,7 @@ data GenerateConfig = GenerateConfig
   , gcTargetDir    :: FilePath
   , gcSystemArch   :: String          -- ^ e.g. "x86_64-linux"
   , gcPythonVenv   :: Bool            -- ^ toggle to enter virtualenv on shell hook
+  , gcNixpkgsStable :: String         -- ^ stable nixpkgs branch/tag (e.g. "nixos-25.11")
   } deriving (Show)
 
 -- Indent a string by n spaces
@@ -58,7 +60,7 @@ generateFlake cfg =
   , ""
   , "  inputs = {"
   , "    nixpkgs.url = \"github:NixOS/nixpkgs/nixpkgs-unstable\";"
-  , "    nixpkgs-stable.url = \"github:NixOS/nixpkgs/nixos-25.11\";"
+  , "    nixpkgs-stable.url = \"github:NixOS/nixpkgs/" ++ gcNixpkgsStable cfg ++ "\";"
   , "    flake-utils.url = \"github:numtide/flake-utils\";"
   , "  };"
   , ""
@@ -94,15 +96,16 @@ generateBoth cfg = do
       flakePath = dir </> "flake.nix"
       envrcPath = dir </> ".envrc"
 
-  -- Backup existing files
-  backupIfExists flakePath
-  backupIfExists envrcPath
+  res <- try @SomeException $ do
+    createDirectoryIfMissing True dir
+    backupIfExists flakePath
+    backupIfExists envrcPath
+    writeFile flakePath (generateFlake cfg)
+    writeFile envrcPath (generateEnvrc cfg)
 
-  writeFile flakePath (generateFlake cfg)
-  writeFile envrcPath (generateEnvrc cfg)
-
-  return $ Right $
-    "✅  Written:\n  " ++ flakePath ++ "\n  " ++ envrcPath
+  return $ case res of
+    Left err -> Left ("File write failed: " ++ show err)
+    Right _  -> Right $ "✅  Written:\n  " ++ flakePath ++ "\n  " ++ envrcPath
 
 backupIfExists :: FilePath -> IO ()
 backupIfExists fp = do

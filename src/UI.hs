@@ -25,6 +25,7 @@ import Lens.Micro.Platform
 import NixGen
 import NixSearch
 import System.Directory (getCurrentDirectory)
+import System.Environment (lookupEnv)
 
 -- Resource names
 
@@ -80,9 +81,23 @@ data AppState = AppState
   , _unstableCache  :: Maybe [NixResult]
   , _stableCache    :: Maybe [NixResult]
   , _cacheUpdating  :: Bool
+  , _stableVersion  :: String
   } deriving (Show)
 
 makeLensesFor [("_searchEdit", "searchEdit"), ("_dirEdit", "dirEdit")] ''AppState
+
+-- UI Layout and Truncation Constants
+langColWidth :: Int
+langColWidth = 12
+
+pkgColWidth :: Int
+pkgColWidth = 30
+
+searchAttrColWidth :: Int
+searchAttrColWidth = 28
+
+searchDescMaxLength :: Int
+searchDescMaxLength = 55
 
 -- Helpers
 
@@ -191,7 +206,7 @@ drawLangRow s i lang =
         [ str (if sel then " ▶ " else "   ")
         , withAttr peach (str icon)
         , str " "
-        , withAttr (if sel then selectedAttr else titleAttr) (str (padStringRight 12 name))
+        , withAttr (if sel then selectedAttr else titleAttr) (str (padStringRight langColWidth name))
         , str "  "
         , withAttr fgDim (str desc)
         ]
@@ -241,7 +256,7 @@ drawPkgRow s i p =
         , check
         , str " "
         , withAttr (if active then activeAttr else inactiveAttr)
-            (str (padStringRight 30 (pkgLabel p)))
+            (str (padStringRight pkgColWidth (pkgLabel p)))
         , str "  "
         , withAttr fgDim (str (pkgDesc p))
         ]
@@ -279,7 +294,7 @@ drawSearchScreen s =
      , if _searchLoading s
          then hCenter (withAttr peach (str (case _searchError s of
                                               Just err -> err
-                                              Nothing  -> "⏳ Loading packages cache…")))
+                                              Nothing  -> "Loading packages cache…")))
          else case _searchError s of
            Just err -> hCenter (withAttr peach (str ("⚠️  " ++ err)))
            Nothing  -> drawSearchResults s
@@ -313,10 +328,10 @@ drawResultRow s i r =
         [ str (if sel then " ▶ " else "   ")
         , check
         , str " "
-        , withAttr lavender (str (padStringRight 28 (nrAttr r)))
+        , withAttr lavender (str (padStringRight searchAttrColWidth (nrAttr r)))
         , withAttr hintAttr (str chanStr)
         , str "  "
-        , withAttr fgDim (str (take 55 (nrDesc r)))
+        , withAttr fgDim (str (take searchDescMaxLength (nrDesc r)))
         ]
   in if sel
        then withAttr selectedAttr (padRight Max row)
@@ -332,7 +347,7 @@ drawDirScreen s =
   vBox
   [ drawBanner
   , hBorder
-  , hCenter $ withAttr headerAttr (str "📂  output directory")
+  , hCenter $ withAttr headerAttr (str " output directory")
   , hCenter $ withAttr hintAttr (str "Edit path   Enter generate   Esc back")
   , hBorder
   , hBox
@@ -488,7 +503,7 @@ handlePkgEvent chan (VtyEvent (V.EvKey (V.KChar 's') _)) = do
   case activePkgs of
     Nothing -> do
       modify $ \st -> st { _searchLoading = True, _searchError = Nothing }
-      liftIO $ triggerCacheLoad chan (_activeChannel s2)
+      liftIO $ triggerCacheLoad chan (_stableVersion s2) (_activeChannel s2)
     Just _ -> return ()
 handlePkgEvent _ (VtyEvent (V.EvKey V.KEnter _)) =
   modify $ \s -> s { _screen = DirScreen }
@@ -533,7 +548,7 @@ handleSearchEvent chan (VtyEvent (V.EvKey (V.KChar 's') [V.MCtrl])) = do
     case activePkgs of
       Nothing -> do
         modify $ \st -> st { _searchLoading = True, _searchError = Nothing }
-        liftIO $ triggerCacheLoad chan nextChan
+        liftIO $ triggerCacheLoad chan (_stableVersion s2) nextChan
       Just pkgs -> do
         let q = concat (getEditContents (_searchEdit s2))
             results = searchLocal q pkgs
@@ -541,7 +556,7 @@ handleSearchEvent chan (VtyEvent (V.EvKey (V.KChar 's') [V.MCtrl])) = do
 handleSearchEvent chan (VtyEvent (V.EvKey (V.KChar 'u') [V.MCtrl])) = do
   s <- get
   when (not (_cacheUpdating s)) $ do
-    liftIO $ triggerCacheUpdate chan (_activeChannel s)
+    liftIO $ triggerCacheUpdate chan (_stableVersion s) (_activeChannel s)
 handleSearchEvent _ ev = zoom searchEdit $ handleEditorEvent ev
 
 -- Dir screen
@@ -561,6 +576,7 @@ handleDirEvent _ (VtyEvent (V.EvKey V.KEnter _)) = do
         , gcTargetDir    = if null dir then "." else dir
         , gcSystemArch   = _arch s
         , gcPythonVenv   = _pythonVenv s && (lang == Python) && any (\p -> pkgName p == "python3Packages.pip") pkgs
+        , gcNixpkgsStable = _stableVersion s
         }
   result <- liftIO $ generateBoth cfg
   case result of
@@ -576,29 +592,29 @@ handleDoneEvent _ _ = return ()
 
 -- Cache helpers
 
-triggerCacheLoad :: CuteChan -> Channel -> IO ()
-triggerCacheLoad chan c = void $ forkIO $ do
-  res <- loadCache c
+triggerCacheLoad :: CuteChan -> String -> Channel -> IO ()
+triggerCacheLoad chan version c = void $ forkIO $ do
+  res <- loadCache version c
   case res of
     Right pkgs -> writeBChan chan (CacheLoadDone c pkgs)
     Left _     -> writeBChan chan (CacheLoadFailed c "Cache not found. Press Ctrl+u to download.")
 
-triggerCacheUpdate :: CuteChan -> Channel -> IO ()
-triggerCacheUpdate chan c = void $ forkIO $ do
+triggerCacheUpdate :: CuteChan -> String -> Channel -> IO ()
+triggerCacheUpdate chan version c = void $ forkIO $ do
   writeBChan chan (CacheUpdateStarted c)
-  res <- updateCache c
+  res <- updateCache version c
   case res of
     Left err -> writeBChan chan (CacheUpdateFailed c err)
     Right _  -> do
-      loadRes <- loadCache c
+      loadRes <- loadCache version c
       case loadRes of
         Right pkgs -> writeBChan chan (CacheUpdateDone c pkgs)
         Left err   -> writeBChan chan (CacheUpdateFailed c ("Failed to load cache after download: " ++ err))
 
 -- Initial state
 
-initialState :: FilePath -> String -> AppState
-initialState cwd arch = AppState
+initialState :: FilePath -> String -> String -> AppState
+initialState cwd arch version = AppState
   { _screen        = LangScreen
   , _langCursor    = 0
   , _pkgCursor     = 0
@@ -618,6 +634,7 @@ initialState cwd arch = AppState
   , _unstableCache = Nothing
   , _stableCache   = Nothing
   , _cacheUpdating = False
+  , _stableVersion = version
   }
 
 -- BChan-aware search trigger
@@ -666,12 +683,15 @@ runApp = do
   arch <- detectArch
   chan <- newBChan 10
 
+  envStable <- lookupEnv "NIX_STABLE_VERSION"
+  let stableVersion = maybe "nixos-25.11" id envStable
+
   let buildVty = VCP.mkVty V.defaultConfig
   initialVty <- buildVty
 
   void $ customMain initialVty buildVty (Just chan)
     (appWithSearch chan)
-    (initialState cwd arch)
+    (initialState cwd arch stableVersion)
 
 detectArch :: IO String
 detectArch = do
@@ -707,7 +727,7 @@ drawVenvRecommendation s =
        then vBox
             [ hBorder
             , padLeftRight 2 $ withAttr peach $ border $ vBox
-              [ hCenter $ withAttr pink (str "✨ Highly Recommended for Pip ✨")
+              [ hCenter $ withAttr pink (str " Highly Recommended for Pip")
               , hCenter $ str "Using pip inside a Nix environment can cause externally-managed-environment errors."
               , hCenter $ str "We highly recommend auto-creating and activating a virtual environment."
               , str ""
