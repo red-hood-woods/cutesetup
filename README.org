@@ -1,6 +1,8 @@
 #+author: Alice Liddell 
 #+options: toc:nil
 
+[[file:demo.gif]]
+
 * What?
 ✿ A cute Haskell TUI for quickly scaffolding =flake.nix= + =.envrc= for common languages.
 
@@ -36,6 +38,12 @@ Because manually writing Nix flakes every time you start a new project is annoyi
 | Dir        | =Enter=       | *Generate files*       |
 | Dir        | =Esc=         | Back to packages       |
 | Done       | =q= / =Enter= | Exit                   |
+
+** Nix Run
+#+BEGIN_SRC bash
+nix run github:red-hood-woods/cutesetup
+#+END_SRC
+
 
 ** Building from source
 
