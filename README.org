@@ -41,7 +41,7 @@ Because manually writing Nix flakes every time you start a new project is annoyi
 
 ** Nix Run
 #+BEGIN_SRC bash
-nix run github:red-hood-woods/cutesetup
+nix run github:petalmaya/cutesetup
 #+END_SRC
 
 
